@@ -12,26 +12,26 @@ logger = structlog.get_logger()
 class Converter:
     def __init__(self, input: RomanNumber | ArabicNumber):
         self.roman_to_arabic = ROMAN_TO_ARABIC
-        # self.arabic_to_roman = {v: k for k, v in ROMAN_TO_ARABIC.items()} 
         self.arabic_to_roman = ARABIC_TO_ROMAN
         self.input = input
         self.output = None
         self.duration = 0
+        self.cache = cache
 
-        # Try to retrieve from cache
-        cache_key = self._generate_redis_cache_key()
-        cached_value = cache.get(cache_key)
-        if cached_value:
-            self.output = cached_value
+        # Try to retrieve from cache if available
+        cached_result = self._get_from_cache()
+        if cached_result is not None:
+            self.output = cached_result
             return
 
-        # If not in cache, perform conversion and set it to cache
+        # If not in cache, perform conversion
         if isinstance(input, RomanNumber):
             self.output, self.duration = self.convert_to_arabic()
         elif isinstance(input, ArabicNumber):
             self.output, self.duration = self.convert_to_roman()
 
-        cache.set(cache_key, self.output)
+        # Cache the result if cache is available
+        self._set_to_cache()
 
     def _generate_redis_cache_key(self) -> str:
         """
@@ -41,25 +41,21 @@ class Converter:
         input_value = str(self.input.number)
         return f"easyconvert:{input_type}:{input_value}"
     
-    def _convert(self):
-        """
-        Converts the input number based on its type, using Redis cache if available.
-        """
-        # Try to retrieve from cache
+    def _get_from_cache(self):
+        """Try to get result from cache."""
+        if not self.cache or not self.cache.is_connected():
+            return None
+            
         cache_key = self._generate_redis_cache_key()
-        cached_value = cache.get(cache_key)
-        if cached_value:
-            self.output = cached_value
+        return self.cache.get(cache_key)
+    
+    def _set_to_cache(self):
+        """Set result to cache if available."""
+        if not self.cache or not self.cache.is_connected():
             return
-
-        # If not in cache, perform conversion and set it to cache
-        if isinstance(input, RomanNumber):
-            self.output = self.convert_to_arabic()
-        elif isinstance(input, ArabicNumber):
-            self.output = self.convert_to_roman()
-
-        cache.set(cache_key, self.output)
-
+            
+        cache_key = self._generate_redis_cache_key()
+        self.cache.set(cache_key, self.output)
 
     def convert_to_arabic(self) -> tuple[int, float]:
         """
@@ -68,7 +64,6 @@ class Converter:
         Example: MMMDCCXXIV (Roman) -> 3724 (Arabic)
         reversed: VIXXCCDMMM 
         """
-
         input_number = self.input.number
         logger.info("Performing Roman to Arabic conversion...", input=input_number)
         start = time.perf_counter()
@@ -107,4 +102,3 @@ class Converter:
         duration = round((end - start) * 1000, 5)
 
         return ''.join(roman_numerals), duration
-    
